@@ -70,9 +70,11 @@ class SerialLogger:
                 assert False, "unhandled option"
                 sys.exit()
 
+        sal = None
         for port in list_ports.grep('usbserial'):
-        	sal = port
-        self.serialPort = sal[0]
+            sal = port
+        if sal != None:
+            self.serialPort = sal[0]
 
         if self.serialPort == None:
             print self.usage()
