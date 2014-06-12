@@ -27,6 +27,7 @@
 
 import datetime
 import getopt
+import glob
 import os
 import serial
 import signal
@@ -48,14 +49,16 @@ class SerialLogger:
         self.outFileName = None
         self.err = None
         self.ser = None
+        self.baud = None
+        self.tail = None
 
     def main(self):
         """ Main method, parse parameters, open serial and file, call the main loop method. """
 
         try:
-            opts, args = getopt.getopt(sys.argv[1:], "ht:r:s:o:", ["help", "serial=", "outfile="])
+            opts, args = getopt.getopt(sys.argv[1:], "hs:b:o:t", ["help", "serial=", "baud=" "outfile=", "tail"])
         except getopt.GetoptError, self.err:
-            print(err)
+            print(self.err)
             print self.usage()
             sys.exit(2)
         for opt, arg in opts:
@@ -64,24 +67,46 @@ class SerialLogger:
                 sys.exit(0)
             elif opt in ("-s", "--serial"):
                 self.serialPort = arg
+            elif opt in ("-b", "--baud"):
+                self.baud = arg
             elif opt in ("-o", "--outfile"):
                 self.outFileName = arg
+            elif opt in ("-t", "--tail"):
+                self.tail = True
             else:
                 assert False, "unhandled option"
                 sys.exit()
 
-        sal = None
-        for port in list_ports.grep('usbserial'):
-            sal = port
-        if sal != None:
-            self.serialPort = sal[0]
-
-        if self.serialPort == None:
-            print self.usage()
+        # Check if serial port exists.
+        fail = False
+        if self.serialPort != None:
+            if not os.path.exists(self.serialPort):
+                print "Unable to open, invalid serial port."
+                sys.exit(2)
+        else:
+            available_ports = glob.glob('/dev/tty.usbmodem*') + glob.glob('/dev/tty.usbserial*')
+            if len(available_ports) >= 1:
+                self.serialPort = available_ports[0]
+                if not os.path.exists(self.serialPort):
+                    fail = True
+            else:
+                fail = True
+        if fail:
+            print "Need to enter a proper serial, tty.usbmodem or tty.usbserial or COM."
             sys.exit(2)
 
+        # Validate baud rate.
+        if self.baud != None:
+            if not self.baud >= 1200 and self.baud <= 921600:
+                print "Invalid baud rate, min 1200 bps and max 921600 bps."
+                print self.usage()
+                sys.exit(2)
+        else:
+            print "Using default 19200 bps. :)"
+            self.baud = 19200
+
         try:
-            self.ser = serial.Serial(self.serialPort, 19200, timeout=0.5, parity=serial.PARITY_NONE)
+            self.ser = serial.Serial(self.serialPort, self.baud, timeout=0.5, parity=serial.PARITY_NONE)
             time.sleep(3)
 
             if not self.ser.isOpen():
@@ -98,27 +123,31 @@ class SerialLogger:
                 actualTime = datetime.datetime.now()
                 self.outFile.write(actualTime.ctime())
                 self.outFile.write(unicode("\nStarting log...\n"))
-                # Try to read any data sent from Arduino.
-                arduData = self.ser.read(50)
-                self.outFile.write(arduData)
                 self.outFile.flush()
-                # Starts the process, send start character to Arduino.
                 initTime = time.time()
-                self.ser.write('s')
 
-                while True:
-                    line = self.ser.readline()
-                    self.outFile.write(line)
-                    self.outFile.flush()
+                if self.tail:
+                    while True:
+                        line = self.ser.readline()
+                        sys.stdout.write(line)
+                        self.outFile.write(line)
+                        self.outFile.flush()
+                else:
+                    while True:
+                        line = self.ser.readline()
+                        self.outFile.write(line)
+                        self.outFile.flush()
 
     def usage(self):
         """ Returns usage message. """
 
         return "Usage: %s\n" \
-                "-o\t--outfile\tOutput file to save the log\n" \
-                "-s\t--serial\tSerial port where Arduino is connected\n" \
+                "-o\t--outfile\tOutput file to save the log, default yy-mm-dd.log\n" \
+                "-s\t--serial\tSerial port where device is connected\n" \
+                "-b\t--baud\t\tBaud rate min 1200 and max 921600, default 19200\n" \
+                "-t\t--tail\t\tLog and prints device output to command line\n" \
                 "-h\t--help\t\tThis help\n" \
-                "example: %s -o log1.txt -s '/dev/tty.usbusbmodemXXX'" % (sys.argv[0], sys.argv[0])
+                "example: %s -o log1.txt -s '/dev/tty.usbusbmodemXXX' -b 19200 -t" % (sys.argv[0], sys.argv[0])
 
     def end_gracefully(self):
         """ This is called to close open file and serial handlers. """
@@ -134,22 +163,6 @@ class SerialLogger:
 
         self.end_gracefully()
         sys.exit(0)
-
-    def list_serial_ports():
-        """
-        Returns a generator for all available serial ports
-        """
-        if os.name == 'nt':
-            for i in range(256):
-            	try:
-                	s = serial.Serial(i)
-                	s.close()
-                	yield 'COM' + str(i + 1)
-            	except serial.SerialException:
-            		pass
-        else:
-            for port in list_ports.grep('usbserial'):
-            	yield port[0]
 
 if __name__ == '__main__':
     # Creates an instance of SerialLogger
