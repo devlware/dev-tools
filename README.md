@@ -16,7 +16,7 @@ By now most of the tests were conducted in MacOS. But, it should work on Windows
 Usage: SerialLogger.py  
 -o	--outfile	Output file to save the log  
 -s	--serial	Serial port where Arduino is connected  
--b  --baud      Baud rate min 1200 and max 921600, default 19200
--t  --tail      Log and prints device output to command line
+-b  --baud    Baud rate min 1200 and max 921600, default 19200  
+-t  --tail    Log and prints device output to command line  
 -h	--help		This help  
 example: SerialLogger.py -o log1.txt -s '/dev/tty.usbusbmodemXXX' -b 19200 -t
