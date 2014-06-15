@@ -77,23 +77,8 @@ class SerialLogger:
                 assert False, "unhandled option"
                 sys.exit()
 
-        # Check if serial port exists.
-        fail = False
-        if self.serialPort != None:
-            if not os.path.exists(self.serialPort):
-                print "Unable to open, invalid serial port."
-                sys.exit(2)
-        else:
-            available_ports = glob.glob('/dev/tty.usbmodem*') + glob.glob('/dev/tty.usbserial*')
-            if len(available_ports) >= 1:
-                self.serialPort = available_ports[0]
-                if not os.path.exists(self.serialPort):
-                    fail = True
-            else:
-                fail = True
-        if fail:
-            print "Need to enter a proper serial, tty.usbmodem or tty.usbserial or COM."
-            sys.exit(2)
+        # Check if serial port is ok.
+        self.handle_serial_ports()
 
         # Validate baud rate.
         if self.baud != None:
@@ -102,13 +87,13 @@ class SerialLogger:
                 print self.usage()
                 sys.exit(2)
         else:
-            print "Using default 19200 bps. :)"
+            print "Using default baud rate of 19200 bps. Ultra fast ;)"
             self.baud = 19200
 
+        # Try to open serial port.
         try:
             self.ser = serial.Serial(self.serialPort, self.baud, timeout=0.5, parity=serial.PARITY_NONE)
             time.sleep(3)
-
             if not self.ser.isOpen():
                 print "Serial port is not opened, please check."
                 sys.exit(-1)
@@ -116,27 +101,72 @@ class SerialLogger:
             print "Could not open Serial port."
             sys.exit(-1)
 
+        # if not passed a file name use default yyyy-mm-dd.log
         if self.outFileName == None:
             self.outFileName = str(datetime.datetime.now().date()) + '.log'
 
-            with open(self.outFileName, 'a') as self.outFile:
-                actualTime = datetime.datetime.now()
-                self.outFile.write(actualTime.ctime())
-                self.outFile.write(unicode("\nStarting log...\n"))
-                self.outFile.flush()
-                initTime = time.time()
+        with open(self.outFileName, 'a') as self.outFile:
+            actualTime = datetime.datetime.now()
+            self.outFile.write(actualTime.ctime())
+            self.outFile.write(unicode("\nStarting log...\n"))
+            self.outFile.flush()
+            initTime = time.time()
 
-                if self.tail:
-                    while True:
-                        line = self.ser.readline()
+            while True:
+                try:
+                    line = self.ser.readline()
+                    if self.tail:
                         sys.stdout.write(line)
-                        self.outFile.write(line)
-                        self.outFile.flush()
-                else:
-                    while True:
-                        line = self.ser.readline()
-                        self.outFile.write(line)
-                        self.outFile.flush()
+                    self.outFile.write(line)
+                    self.outFile.flush()
+                except (serial.SerialException):
+                    self.outFile.write(unicode("\nSerial error.\n"))
+                    print "Serial error, exiting..."
+                    self.end_gracefully()
+                    sys.exit(0)
+
+    def handle_serial_ports(self):
+        """ List available serial ports for depending on OS. """
+        
+        # Check if serial port exists.
+        found = False
+        computer_ports = None
+        
+        if self.serialPort != None:
+            if os.name == 'nt':
+                # windows XP and 7 gives nt, com ports should be COMXXX
+                computer_ports = list(serial.tools.list_ports.comports())
+                if len(computer_ports) > 0:
+                    for port_item in computer_ports:
+                        if port_item[0] == self.serialPort:
+                            found = True
+                            break
+            elif os.name == 'posix':
+                # Macos and Linux gives posix.
+                computer_ports = glob.glob('/dev/tty.usbmodem*') + glob.glob('/dev/tty.usbserial*')
+                if len(computer_ports) > 0:
+                    for port_item in computer_ports:
+                        if port_item == self.serialPort:
+                            found = True
+                            break            
+        else:
+            if os.name == 'nt':
+                computer_ports = list(serial.tools.list_ports.comports())
+                if len(computer_ports) > 0:
+                    self.serialPort = computer_ports[0][0]
+                    found = True
+                    print "Using default COM port: " + self.serialPort
+            elif os.name == 'posix':
+                computer_ports = glob.glob('/dev/tty.usbmodem*') + glob.glob('/dev/tty.usbserial*')
+                if len(computer_ports) > 0:
+                    self.serialPort = computer_ports[0]
+                    found = True
+                    print "Using default serial port: " + self.serialPort
+            
+        if found == False:
+            print "Need to enter a proper serial, tty.usbmodem or tty.usbserial or COMXYZ."
+            print self.usage()            
+            sys.exit(2)
 
     def usage(self):
         """ Returns usage message. """
@@ -154,7 +184,8 @@ class SerialLogger:
 
         actualTime = datetime.datetime.now()
         self.outFile.write(actualTime.ctime())
-        self.ser.close()
+        if self.ser.isOpen():
+            self.ser.close()
         self.outFile.write(unicode("\nStoping log due to Signal INT.\n"))
         self.outFile.close()
 
